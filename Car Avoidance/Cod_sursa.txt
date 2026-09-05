@@ -1,0 +1,302 @@
+#include <Arduino.h>
+#include <ESP32Servo.h>
+
+// =====================================================
+// PINI PENTRU ESP32 + L298N + HC-SR04 + SG90
+// =====================================================
+
+// L298N
+const int ENA = 25;
+const int LeftMotorForward = 13;   // IN1
+const int LeftMotorBackward = 12;  // IN2
+
+const int ENB = 26;
+const int RightMotorForward = 14;  // IN3
+const int RightMotorBackward = 27; // IN4
+
+// HC-SR04
+const int trig_pin = 33;
+const int echo_pin = 34;
+
+// Servo SG90
+const int servoPin = 32;
+
+// =====================================================
+// SETARI
+// =====================================================
+
+const int maximum_distance = 200;
+const int obstacleDistance = 45;
+
+// 0 - 255
+const int motorSpeed = 120;
+
+// Timpuri de miscare
+const int reverseTime = 400;
+const int turnTime = 500;
+
+// Pozitiile servo
+const int servoCenter = 115;
+const int servoRight = 50;
+const int servoLeft = 170;
+
+bool goesForward = false;
+long distance = 100;
+
+Servo servo_motor;
+
+// =====================================================
+// SETEAZA VITEZA MOTOARELOR
+// =====================================================
+
+void setMotorSpeed(int speedValue) {
+  speedValue = constrain(speedValue, 0, 255);
+
+  analogWrite(ENA, speedValue);
+  analogWrite(ENB, speedValue);
+}
+
+// =====================================================
+// ULTRASONIC
+// =====================================================
+
+long readPing() {
+  digitalWrite(trig_pin, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(trig_pin, HIGH);
+  delayMicroseconds(10);
+
+  digitalWrite(trig_pin, LOW);
+
+  unsigned long duration = pulseIn(echo_pin, HIGH, 30000);
+
+  if (duration == 0) {
+    return 250;
+  }
+
+  long cm = duration / 58;
+
+  if (cm <= 0) {
+    cm = 250;
+  }
+
+  if (cm > maximum_distance) {
+    cm = maximum_distance;
+  }
+
+  return cm;
+}
+
+// =====================================================
+// SERVO + SCANARE
+// =====================================================
+
+int lookRight() {
+  servo_motor.write(servoRight);
+  delay(500);
+
+  int d = readPing();
+
+  delay(100);
+  servo_motor.write(servoCenter);
+
+  return d;
+}
+
+int lookLeft() {
+  servo_motor.write(servoLeft);
+  delay(500);
+
+  int d = readPing();
+
+  delay(100);
+  servo_motor.write(servoCenter);
+
+  return d;
+}
+
+// =====================================================
+// MOTOARE
+// =====================================================
+
+void moveStop() {
+  analogWrite(ENA, 0);
+  analogWrite(ENB, 0);
+
+  digitalWrite(LeftMotorForward, LOW);
+  digitalWrite(LeftMotorBackward, LOW);
+
+  digitalWrite(RightMotorForward, LOW);
+  digitalWrite(RightMotorBackward, LOW);
+
+  goesForward = false;
+}
+
+void moveForward() {
+  goesForward = true;
+
+  setMotorSpeed(motorSpeed);
+
+  digitalWrite(LeftMotorForward, HIGH);
+  digitalWrite(LeftMotorBackward, LOW);
+
+  digitalWrite(RightMotorForward, HIGH);
+  digitalWrite(RightMotorBackward, LOW);
+}
+
+void moveBackward() {
+  goesForward = false;
+
+  setMotorSpeed(motorSpeed);
+
+  digitalWrite(LeftMotorForward, LOW);
+  digitalWrite(LeftMotorBackward, HIGH);
+
+  digitalWrite(RightMotorForward, LOW);
+  digitalWrite(RightMotorBackward, HIGH);
+}
+
+// Viraj pe loc spre DREAPTA
+void turnRight() {
+  goesForward = false;
+
+  setMotorSpeed(motorSpeed);
+
+  digitalWrite(LeftMotorForward, HIGH);
+  digitalWrite(LeftMotorBackward, LOW);
+
+  digitalWrite(RightMotorForward, LOW);
+  digitalWrite(RightMotorBackward, HIGH);
+
+  delay(turnTime);
+
+  moveForward();
+}
+
+// Viraj pe loc spre STANGA
+void turnLeft() {
+  goesForward = false;
+
+  setMotorSpeed(motorSpeed);
+
+  digitalWrite(LeftMotorForward, LOW);
+  digitalWrite(LeftMotorBackward, HIGH);
+
+  digitalWrite(RightMotorForward, HIGH);
+  digitalWrite(RightMotorBackward, LOW);
+
+  delay(turnTime);
+
+  moveForward();
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup() {
+  Serial.begin(115200);
+
+  // L298N
+  pinMode(ENA, OUTPUT);
+  pinMode(ENB, OUTPUT);
+
+  pinMode(LeftMotorForward, OUTPUT);
+  pinMode(LeftMotorBackward, OUTPUT);
+  pinMode(RightMotorForward, OUTPUT);
+  pinMode(RightMotorBackward, OUTPUT);
+
+  // Ultrasonic
+  pinMode(trig_pin, OUTPUT);
+  pinMode(echo_pin, INPUT);
+  digitalWrite(trig_pin, LOW);
+
+  // Servo
+  servo_motor.setPeriodHertz(50);
+  servo_motor.attach(servoPin, 500, 2400);
+
+  // Pornire sigura
+  moveStop();
+
+  servo_motor.write(servoCenter);
+  delay(2000);
+
+  distance = readPing();
+  delay(100);
+
+  distance = readPing();
+  delay(100);
+
+  distance = readPing();
+  delay(100);
+
+  distance = readPing();
+  delay(100);
+
+  Serial.println("Robot ESP32 pornit.");
+  Serial.print("Distanta initiala: ");
+  Serial.print(distance);
+  Serial.println(" cm");
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop() {
+  int distanceRight = 0;
+  int distanceLeft = 0;
+
+  delay(50);
+
+  Serial.print("Distanta: ");
+  Serial.println(distance);
+
+  if (distance <= obstacleDistance) {
+
+    // Oprim
+    moveStop();
+    delay(300);
+
+    // Dam cu spatele
+    moveBackward();
+    delay(reverseTime);
+
+    // Oprim inainte de scanare
+    moveStop();
+    delay(300);
+
+    // Scanare dreapta
+    distanceRight = lookRight();
+    delay(300);
+
+    // Scanare stanga
+    distanceLeft = lookLeft();
+    delay(300);
+
+    Serial.print("Dreapta: ");
+    Serial.print(distanceRight);
+    Serial.print(" cm | Stanga: ");
+    Serial.print(distanceLeft);
+    Serial.println(" cm");
+
+    // =================================================
+    // INVERSARE DIRECTIE:
+    // Daca este mai mult spatiu in DREAPTA -> face STANGA
+    // Daca este mai mult spatiu in STANGA -> face DREAPTA
+    // =================================================
+    if (distanceRight >= distanceLeft) {
+      turnLeft();
+    } else {
+      turnRight();
+    }
+
+    delay(50);
+
+  } else {
+    moveForward();
+  }
+
+  distance = readPing();
+}
