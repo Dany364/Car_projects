@@ -1,0 +1,3158 @@
+Arduino:
+
+#include <Servo.h>
+
+// ==================== PINI ====================
+
+// Servo
+#define SERVO_PIN 9
+
+// HC-SR04
+#define TRIG_PIN 10
+#define ECHO_PIN 11
+
+// IR
+#define IR_FRONT_LEFT  30
+#define IR_FRONT_RIGHT 31
+#define IR_REAR_LEFT   32
+#define IR_REAR_RIGHT  33
+
+// L298N
+#define ENA 5
+#define IN1 6
+#define IN2 7
+#define IN3 8
+#define IN4 12
+#define ENB 13
+
+// Buzzer
+#define BUZZER_PIN 22
+
+// LDR
+#define LDR_PIN A0
+
+// LED-uri
+#define LED_FRONT_LEFT  44
+#define LED_FRONT_RIGHT 45
+#define LED_SIDE_LEFT   37
+#define LED_SIDE_RIGHT  36
+#define LED_REAR_LEFT   38
+#define LED_REAR_RIGHT  39
+
+// UART ESP32-CAM
+#define BAUDRATE 9600
+
+
+// ==================== SERVO ====================
+
+Servo servo;
+int servoPosition = 90;
+
+
+// ==================== AVOIDANCE ====================
+
+const int maximum_distance = 200;
+const int obstacleDistance = 25;
+
+// Viteza normală
+const int motorSpeed = 130;
+
+// Viteza normală în avoidance
+const int avoidanceSpeed = 100;
+
+// Viteza viraj manual
+const int turnSpeed = 180;
+
+// Viteza viraj AVOIDANCE
+const int avoidanceTurnSpeed = 180;
+
+const int reverseTime = 400;
+const int turnTime = 500;
+
+const int servoCenter = 115;
+const int servoRight = 50;
+const int servoLeft = 170;
+
+
+// ==================== MOD ====================
+
+enum RobotMode {
+  MODE_MANUAL,
+  MODE_AVOIDANCE
+};
+
+RobotMode currentMode = MODE_MANUAL;
+
+
+// ==================== COMANDA ESP ====================
+
+String espCommand = "";
+
+
+// ==================== DISTANTA ====================
+
+long readDistance() {
+
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+
+  digitalWrite(TRIG_PIN, LOW);
+
+  unsigned long duration =
+    pulseIn(ECHO_PIN, HIGH, 30000);
+
+  if (duration == 0) {
+    return 250;
+  }
+
+  long cm = duration / 58;
+
+  if (cm <= 0) {
+    cm = 250;
+  }
+
+  if (cm > maximum_distance) {
+    cm = maximum_distance;
+  }
+
+  return cm;
+}
+
+
+// ==================== MOTOARE ====================
+
+void motorStop() {
+
+  analogWrite(ENA, 0);
+  analogWrite(ENB, 0);
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+}
+
+
+void motorForward() {
+
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+
+  analogWrite(ENA, motorSpeed);
+  analogWrite(ENB, motorSpeed);
+}
+
+
+void motorBackward() {
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+
+  analogWrite(ENA, motorSpeed);
+  analogWrite(ENB, motorSpeed);
+}
+
+
+void motorLeft() {
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+
+  analogWrite(ENA, motorSpeed);
+  analogWrite(ENB, motorSpeed);
+}
+
+
+void motorRight() {
+
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+
+  analogWrite(ENA, motorSpeed);
+  analogWrite(ENB, motorSpeed);
+}
+
+
+// ============================================================
+// VIRAJ MANUAL STANGA
+// Viteza = 180
+// ============================================================
+
+void manualLeft() {
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+
+  analogWrite(ENA, turnSpeed);
+  analogWrite(ENB, turnSpeed);
+}
+
+
+// ============================================================
+// VIRAJ MANUAL DREAPTA
+// Viteza = 180
+// ============================================================
+
+void manualRight() {
+
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+
+  analogWrite(ENA, turnSpeed);
+  analogWrite(ENB, turnSpeed);
+}
+
+
+// ==================== BUZZER ====================
+
+void buzzer() {
+  tone(BUZZER_PIN, 1000, 300);
+}
+
+
+// ==================== AVOIDANCE ====================
+
+int lookRight() {
+
+  servoPosition = servoRight;
+  servo.write(servoRight);
+
+  delay(500);
+
+  int distance = readDistance();
+
+  delay(100);
+
+  servoPosition = servoCenter;
+  servo.write(servoCenter);
+
+  return distance;
+}
+
+
+int lookLeft() {
+
+  servoPosition = servoLeft;
+  servo.write(servoLeft);
+
+  delay(500);
+
+  int distance = readDistance();
+
+  delay(100);
+
+  servoPosition = servoCenter;
+  servo.write(servoCenter);
+
+  return distance;
+}
+
+
+void runAvoidance() {
+
+  long distance = readDistance();
+
+
+  // ==================================================
+  // DRUM LIBER
+  // FAȚĂ -> motorRight()
+  // Viteza = 100
+  // ==================================================
+
+  if (distance > obstacleDistance) {
+
+    motorRight();
+
+    analogWrite(ENA, avoidanceSpeed);
+    analogWrite(ENB, avoidanceSpeed);
+
+    return;
+  }
+
+
+  // ==================================================
+  // OBSTACOL DETECTAT
+  // ==================================================
+
+  motorStop();
+  delay(200);
+
+
+  // ==================================================
+  // RETRAGERE
+  // SPATE -> motorLeft()
+  // Viteza = 100
+  // ==================================================
+
+  motorLeft();
+
+  analogWrite(ENA, avoidanceSpeed);
+  analogWrite(ENB, avoidanceSpeed);
+
+  delay(reverseTime);
+
+  motorStop();
+  delay(200);
+
+
+  // ==================================================
+  // VERIFICĂM DREAPTA
+  // ==================================================
+
+  int distanceRight = lookRight();
+
+  if (currentMode != MODE_AVOIDANCE) {
+
+    motorStop();
+
+    return;
+  }
+
+
+  // ==================================================
+  // VERIFICĂM STÂNGA
+  // ==================================================
+
+  int distanceLeft = lookLeft();
+
+  if (currentMode != MODE_AVOIDANCE) {
+
+    motorStop();
+
+    return;
+  }
+
+
+  // ==================================================
+  // ALEGEM DIRECȚIA CU MAI MULT SPAȚIU
+  //
+  // STÂNGA / DREAPTA INVERSATE
+  // ==================================================
+
+  if (distanceLeft >= distanceRight) {
+
+    // ==================================================
+    // STÂNGA AVOIDANCE
+    // -> motorBackward()
+    //
+    // Viteza = 180
+    // ==================================================
+
+    motorBackward();
+
+    analogWrite(ENA, avoidanceTurnSpeed);
+    analogWrite(ENB, avoidanceTurnSpeed);
+
+    delay(turnTime);
+
+  }
+
+  else {
+
+    // ==================================================
+    // DREAPTA AVOIDANCE
+    // -> motorForward()
+    //
+    // Viteza = 180
+    // ==================================================
+
+    motorForward();
+
+    analogWrite(ENA, avoidanceTurnSpeed);
+    analogWrite(ENB, avoidanceTurnSpeed);
+
+    delay(turnTime);
+  }
+
+
+  // ==================================================
+  // STOP DUPĂ VIRAJ
+  // ==================================================
+
+  motorStop();
+  delay(150);
+
+
+  servoPosition = servoCenter;
+  servo.write(servoCenter);
+
+
+  // ==================================================
+  // CONTINUĂM ÎNAINTE
+  // Viteza = 100
+  // ==================================================
+
+  motorRight();
+
+  analogWrite(ENA, avoidanceSpeed);
+  analogWrite(ENB, avoidanceSpeed);
+}
+
+
+// ==================== LEDURI ====================
+
+void updateLEDs() {
+
+  int ldrValue = analogRead(LDR_PIN);
+
+  if (ldrValue < 250) {
+
+    digitalWrite(LED_FRONT_LEFT, HIGH);
+    digitalWrite(LED_FRONT_RIGHT, HIGH);
+
+    digitalWrite(LED_SIDE_LEFT, HIGH);
+    digitalWrite(LED_SIDE_RIGHT, HIGH);
+
+    digitalWrite(LED_REAR_LEFT, HIGH);
+    digitalWrite(LED_REAR_RIGHT, HIGH);
+
+    return;
+  }
+
+
+  digitalWrite(LED_FRONT_LEFT, LOW);
+  digitalWrite(LED_FRONT_RIGHT, LOW);
+
+  digitalWrite(LED_SIDE_LEFT, LOW);
+  digitalWrite(LED_SIDE_RIGHT, LOW);
+
+  digitalWrite(LED_REAR_LEFT, LOW);
+  digitalWrite(LED_REAR_RIGHT, LOW);
+
+
+  if (digitalRead(IR_FRONT_LEFT) == LOW) {
+    digitalWrite(LED_FRONT_LEFT, HIGH);
+  }
+
+  if (digitalRead(IR_FRONT_RIGHT) == LOW) {
+    digitalWrite(LED_FRONT_RIGHT, HIGH);
+  }
+
+  if (digitalRead(IR_REAR_LEFT) == LOW) {
+    digitalWrite(LED_REAR_LEFT, HIGH);
+  }
+
+  if (digitalRead(IR_REAR_RIGHT) == LOW) {
+    digitalWrite(LED_REAR_RIGHT, HIGH);
+  }
+}
+
+
+// ==================== DATE SENZORI ====================
+
+void updateIRParkingBuzzer() {
+
+  static unsigned long lastBeep = 0;
+  static bool buzzerOn = false;
+
+  bool detected =
+    (digitalRead(IR_FRONT_LEFT) == LOW) ||
+    (digitalRead(IR_FRONT_RIGHT) == LOW) ||
+    (digitalRead(IR_REAR_LEFT) == LOW) ||
+    (digitalRead(IR_REAR_RIGHT) == LOW);
+
+  if (!detected) {
+
+    noTone(BUZZER_PIN);
+    buzzerOn = false;
+
+    return;
+  }
+
+  const unsigned long interval = 180;
+  unsigned long now = millis();
+
+  if (now - lastBeep >= interval) {
+
+    lastBeep = now;
+
+    if (buzzerOn) {
+
+      noTone(BUZZER_PIN);
+      buzzerOn = false;
+
+    } else {
+
+      tone(BUZZER_PIN, 1200);
+      buzzerOn = true;
+    }
+  }
+}
+
+
+// ==================== DATE SENZORI -> ESP32 ====================
+
+void sendSensorData() {
+
+  int FL = digitalRead(IR_FRONT_LEFT) == LOW ? 1 : 0;
+  int FR = digitalRead(IR_FRONT_RIGHT) == LOW ? 1 : 0;
+  int RL = digitalRead(IR_REAR_LEFT) == LOW ? 1 : 0;
+  int RR = digitalRead(IR_REAR_RIGHT) == LOW ? 1 : 0;
+
+  long distance = readDistance();
+
+  // LDR
+  int ldrValue = analogRead(LDR_PIN);
+
+  // 0-1023 -> 0-100%
+  int ldrPercent = map(
+    ldrValue,
+    0,
+    1023,
+    0,
+    100
+  );
+
+  ldrPercent = constrain(
+    ldrPercent,
+    0,
+    100
+  );
+
+
+  // Format:
+  // FL,FR,RL,RR,DIST,SERVO,LDR
+
+  Serial1.print(FL);
+  Serial1.print(",");
+
+  Serial1.print(FR);
+  Serial1.print(",");
+
+  Serial1.print(RL);
+  Serial1.print(",");
+
+  Serial1.print(RR);
+  Serial1.print(",");
+
+  Serial1.print(distance);
+  Serial1.print(",");
+
+  Serial1.print(servoPosition);
+  Serial1.print(",");
+
+  Serial1.println(ldrPercent);
+}
+
+
+// ==================== COMENZI ESP32 ====================
+
+void readESPCommands() {
+
+  while (Serial1.available()) {
+
+    char c = Serial1.read();
+
+    if (c == '\n') {
+
+      espCommand.trim();
+
+
+      if (espCommand == "MODE_MANUAL") {
+
+        currentMode = MODE_MANUAL;
+
+        motorStop();
+
+        servoPosition = 90;
+        servo.write(90);
+      }
+
+
+      else if (espCommand == "MODE_AVOIDANCE") {
+
+        currentMode = MODE_AVOIDANCE;
+
+        motorStop();
+
+        servoPosition = servoCenter;
+        servo.write(servoCenter);
+      }
+
+
+      else if (espCommand == "HORN") {
+
+        buzzer();
+      }
+
+
+      else if (currentMode == MODE_MANUAL) {
+
+        // ==================================================
+        // MAPAREA MANUALA
+        //
+        // FAȚĂ    -> motorLeft()
+        // SPATE   -> motorRight()
+        // STÂNGA  -> manualLeft()
+        // DREAPTA -> manualRight()
+        // ==================================================
+
+        if (espCommand == "MOVE_F") {
+
+          motorLeft();
+        }
+
+
+        else if (espCommand == "MOVE_B") {
+
+          motorRight();
+        }
+
+
+        else if (espCommand == "MOVE_L") {
+
+          manualLeft();
+        }
+
+
+        else if (espCommand == "MOVE_R") {
+
+          manualRight();
+        }
+
+
+        else if (espCommand == "MOVE_STOP") {
+
+          motorStop();
+        }
+      }
+
+
+      espCommand = "";
+    }
+
+
+    else {
+
+      espCommand += c;
+
+      if (espCommand.length() > 40) {
+        espCommand = "";
+      }
+    }
+  }
+}
+
+
+// ==================== SETUP ====================
+
+void setup() {
+
+  Serial.begin(115200);
+
+  Serial1.begin(BAUDRATE);
+
+
+  servo.attach(SERVO_PIN);
+
+  servo.write(90);
+
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  digitalWrite(TRIG_PIN, LOW);
+
+
+  pinMode(IR_FRONT_LEFT, INPUT);
+  pinMode(IR_FRONT_RIGHT, INPUT);
+  pinMode(IR_REAR_LEFT, INPUT);
+  pinMode(IR_REAR_RIGHT, INPUT);
+
+
+  pinMode(ENA, OUTPUT);
+
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  pinMode(ENB, OUTPUT);
+
+
+  pinMode(BUZZER_PIN, OUTPUT);
+
+
+  pinMode(LDR_PIN, INPUT);
+
+
+  pinMode(LED_FRONT_LEFT, OUTPUT);
+  pinMode(LED_FRONT_RIGHT, OUTPUT);
+
+  pinMode(LED_SIDE_LEFT, OUTPUT);
+  pinMode(LED_SIDE_RIGHT, OUTPUT);
+
+  pinMode(LED_REAR_LEFT, OUTPUT);
+  pinMode(LED_REAR_RIGHT, OUTPUT);
+
+
+  motorStop();
+
+  updateLEDs();
+}
+
+
+// ==================== LOOP ====================
+
+void loop() {
+
+  updateIRParkingBuzzer();
+
+
+  readESPCommands();
+
+
+  updateLEDs();
+
+
+  if (currentMode == MODE_AVOIDANCE) {
+
+    runAvoidance();
+  }
+
+
+  static unsigned long lastSend = 0;
+
+  if (millis() - lastSend >= 300) {
+
+    lastSend = millis();
+
+    sendSensorData();
+  }
+
+
+  delay(5);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Esp cam:
+
+
+#include "esp_camera.h"
+#include "esp_http_server.h"
+#include <WiFi.h>
+#include <WebServer.h>
+
+// =====================================================
+// WIFI
+// =====================================================
+
+const char* ssid = "YOUR WIFI NAME";
+const char* password = "YOUR WIFI PASSWORD";
+
+// =====================================================
+// SERVER
+// =====================================================
+
+WebServer server(80);
+httpd_handle_t stream_httpd = NULL;
+
+// =====================================================
+// AI THINKER ESP32-CAM
+// =====================================================
+
+#define PWDN_GPIO_NUM     32
+#define RESET_GPIO_NUM    -1
+#define XCLK_GPIO_NUM      0
+#define SIOD_GPIO_NUM     26
+#define SIOC_GPIO_NUM     27
+
+#define Y9_GPIO_NUM       35
+#define Y8_GPIO_NUM       34
+#define Y7_GPIO_NUM       39
+#define Y6_GPIO_NUM       36
+#define Y5_GPIO_NUM       21
+#define Y4_GPIO_NUM       19
+#define Y3_GPIO_NUM       18
+#define Y2_GPIO_NUM        5
+
+#define VSYNC_GPIO_NUM    25
+#define HREF_GPIO_NUM     23
+#define PCLK_GPIO_NUM     22
+
+// =====================================================
+// SENZORI PRIMITI DE LA MEGA
+// FL,FR,RL,RR,DIST,SERVO,LDR
+// =====================================================
+
+volatile int irFrontLeft  = 0;
+volatile int irFrontRight = 0;
+volatile int irRearLeft   = 0;
+volatile int irRearRight  = 0;
+
+volatile int hcDistance = 0;
+volatile int servoPosition = 115;
+volatile int ldrPercent = 0;
+
+volatile unsigned long lastSensorFrame = 0;
+
+TaskHandle_t uartTaskHandle = NULL;
+
+// =====================================================
+// UART - CITIRE MEGA
+// =====================================================
+
+void readMegaSensorDataTask(void *parameter) {
+
+  String line = "";
+
+  for (;;) {
+
+    while (Serial.available()) {
+
+      char c = Serial.read();
+
+      if (c == '\n') {
+
+        line.trim();
+
+        // -------------------------------------------------
+        // Cautam primele 6 virgule
+        // FL,FR,RL,RR,DIST,SERVO,LDR
+        // -------------------------------------------------
+
+        int p1 = line.indexOf(',');
+        int p2 = line.indexOf(',', p1 + 1);
+        int p3 = line.indexOf(',', p2 + 1);
+        int p4 = line.indexOf(',', p3 + 1);
+        int p5 = line.indexOf(',', p4 + 1);
+        int p6 = line.indexOf(',', p5 + 1);
+
+        if (
+          p1 > 0 &&
+          p2 > p1 &&
+          p3 > p2 &&
+          p4 > p3
+        ) {
+
+          int fl = line.substring(0, p1).toInt();
+
+          int fr = line.substring(
+            p1 + 1,
+            p2
+          ).toInt();
+
+          int rl = line.substring(
+            p2 + 1,
+            p3
+          ).toInt();
+
+          int rr = line.substring(
+            p3 + 1,
+            p4
+          ).toInt();
+
+          int dist = 0;
+          int servo = 115;
+          int ldr = 0;
+
+          // DIST
+          if (p5 > p4) {
+
+            dist = line.substring(
+              p4 + 1,
+              p5
+            ).toInt();
+
+          } else {
+
+            dist = line.substring(
+              p4 + 1
+            ).toInt();
+          }
+
+          // SERVO
+          if (p6 > p5) {
+
+            servo = line.substring(
+              p5 + 1,
+              p6
+            ).toInt();
+
+            // LDR
+            ldr = line.substring(
+              p6 + 1
+            ).toInt();
+
+          } else {
+
+            servo = line.substring(
+              p5 + 1
+            ).toInt();
+          }
+
+          // -------------------------------------------------
+          // VALIDARE IR
+          // -------------------------------------------------
+
+          if (
+            (fl == 0 || fl == 1) &&
+            (fr == 0 || fr == 1) &&
+            (rl == 0 || rl == 1) &&
+            (rr == 0 || rr == 1)
+          ) {
+
+            irFrontLeft  = fl;
+            irFrontRight = fr;
+            irRearLeft   = rl;
+            irRearRight  = rr;
+
+            hcDistance = constrain(
+              dist,
+              0,
+              250
+            );
+
+            servoPosition = servo;
+
+            ldrPercent = constrain(
+              ldr,
+              0,
+              100
+            );
+
+            lastSensorFrame = millis();
+          }
+        }
+
+        line = "";
+      }
+
+      else {
+
+        if (c != '\r') {
+
+          line += c;
+
+          if (line.length() > 80) {
+            line = "";
+          }
+        }
+      }
+    }
+
+    vTaskDelay(
+      pdMS_TO_TICKS(2)
+    );
+  }
+}
+
+// =====================================================
+// PAGINA WEB
+// =====================================================
+
+void handleRoot() {
+
+  String html = R"rawliteral(
+
+<!DOCTYPE html>
+
+<html lang="ro">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+>
+
+<title>ROBOT</title>
+
+<style>
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+
+  margin: 0;
+
+  padding: 12px;
+
+  background:
+    radial-gradient(
+      circle at top,
+      #202b39 0%,
+      #0d131b 55%,
+      #070a0e 100%
+    );
+
+  color: white;
+
+  font-family: Arial, sans-serif;
+}
+
+.container {
+
+  width: 100%;
+
+  max-width: 1100px;
+
+  margin: auto;
+}
+
+/* =====================================================
+   TITLU
+   ===================================================== */
+
+h1 {
+
+  text-align: center;
+
+  margin: 5px 0 14px;
+
+  font-size: 26px;
+}
+
+/* =====================================================
+   MODURI - SUS
+   ===================================================== */
+
+.modes {
+
+  display: flex;
+
+  gap: 10px;
+
+  width: 100%;
+
+  margin-bottom: 14px;
+}
+
+.mode-btn {
+
+  flex: 1;
+
+  border: none;
+
+  border-radius: 14px;
+
+  padding: 15px 8px;
+
+  background: #273342;
+
+  color: white;
+
+  font-size: 17px;
+
+  font-weight: bold;
+
+  box-shadow:
+    0 5px 15px rgba(0,0,0,0.3);
+
+  cursor: pointer;
+}
+
+.mode-btn.active {
+
+  background: #168f52;
+
+  box-shadow:
+    0 0 15px rgba(22,143,82,0.5);
+}
+
+.mode-btn:active {
+
+  transform: scale(0.97);
+}
+
+/* =====================================================
+   CAMERA + COMENZI
+   ===================================================== */
+
+.drive-area {
+
+  display: flex;
+
+  gap: 14px;
+
+  align-items: stretch;
+
+  margin-bottom: 14px;
+}
+
+.camera-box {
+
+  flex: 1;
+
+  min-width: 0;
+
+  padding: 10px;
+
+  background: #111923;
+
+  border: 1px solid #293746;
+
+  border-radius: 18px;
+
+  box-shadow:
+    0 8px 25px rgba(0,0,0,0.35);
+}
+
+.camera-title {
+
+  text-align: center;
+
+  font-weight: bold;
+
+  font-size: 14px;
+
+  margin-bottom: 8px;
+
+  opacity: 0.75;
+}
+
+.camera {
+
+  display: block;
+
+  width: 100%;
+
+  aspect-ratio: 4 / 3;
+
+  object-fit: cover;
+
+  background: black;
+
+  border-radius: 12px;
+}
+
+/* =====================================================
+   CONTROL PAD
+   ===================================================== */
+
+.controls-box {
+
+  width: 230px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  padding: 12px;
+
+  background: #111923;
+
+  border: 1px solid #293746;
+
+  border-radius: 18px;
+
+  box-shadow:
+    0 8px 25px rgba(0,0,0,0.35);
+}
+
+.controls {
+
+  width: 100%;
+
+  max-width: 210px;
+
+  display: grid;
+
+  grid-template-columns:
+    repeat(3, 1fr);
+
+  grid-template-rows:
+    repeat(3, 1fr);
+
+  gap: 8px;
+
+  aspect-ratio: 1 / 1;
+}
+
+.control-btn {
+
+  border: none;
+
+  border-radius: 14px;
+
+  background: #293747;
+
+  color: white;
+
+  font-size: 32px;
+
+  font-weight: bold;
+
+  cursor: pointer;
+
+  touch-action: none;
+
+  user-select: none;
+
+  -webkit-user-select: none;
+
+  box-shadow:
+    inset 0 -4px 0 rgba(0,0,0,0.25),
+    0 5px 12px rgba(0,0,0,0.25);
+}
+
+.control-btn:active {
+
+  background: #168f52;
+
+  transform: scale(0.94);
+}
+
+.forward {
+
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.left {
+
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.right {
+
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.backward {
+
+  grid-column: 2;
+  grid-row: 3;
+}
+
+/* =====================================================
+   CARD
+   ===================================================== */
+
+.card {
+
+  background: #111923;
+
+  border: 1px solid #293746;
+
+  border-radius: 18px;
+
+  padding: 14px;
+
+  margin-bottom: 14px;
+
+  box-shadow:
+    0 8px 25px rgba(0,0,0,0.35);
+}
+
+.card-title {
+
+  text-align: center;
+
+  font-size: 18px;
+
+  font-weight: bold;
+
+  margin-bottom: 12px;
+}
+
+/* =====================================================
+   DESEN MAȘINĂ
+   ===================================================== */
+
+.car-area {
+
+  position: relative;
+
+  width: 100%;
+
+  max-width: 620px;
+
+  height: 340px;
+
+  margin: auto;
+}
+
+.car {
+
+  position: absolute;
+
+  width: 220px;
+
+  height: 285px;
+
+  left: 50%;
+
+  top: 50%;
+
+  transform:
+    translate(-50%, -50%);
+
+  background: #2b3949;
+
+  border: 3px solid #60758a;
+
+  border-radius:
+    55px 55px 35px 35px;
+
+  box-shadow:
+    0 10px 25px rgba(0,0,0,0.45);
+}
+
+/* Parbriz */
+
+.windshield {
+
+  position: absolute;
+
+  width: 145px;
+
+  height: 65px;
+
+  top: 28px;
+
+  left: 50%;
+
+  transform:
+    translateX(-50%);
+
+  background: #101a25;
+
+  border: 2px solid #62788e;
+
+  border-radius:
+    25px 25px 12px 12px;
+}
+
+/* Luneta */
+
+.rear-window {
+
+  position: absolute;
+
+  width: 130px;
+
+  height: 48px;
+
+  bottom: 28px;
+
+  left: 50%;
+
+  transform:
+    translateX(-50%);
+
+  background: #101a25;
+
+  border: 2px solid #62788e;
+
+  border-radius: 12px;
+}
+
+/* Linia centrala */
+
+.car-line {
+
+  position: absolute;
+
+  width: 2px;
+
+  height: 155px;
+
+  top: 95px;
+
+  left: 50%;
+
+  transform:
+    translateX(-50%);
+
+  background:
+    rgba(255,255,255,0.08);
+}
+
+/* Roți */
+
+.wheel {
+
+  position: absolute;
+
+  width: 31px;
+
+  height: 72px;
+
+  background: #070a0d;
+
+  border: 2px solid #3a444e;
+
+  border-radius: 11px;
+}
+
+.wheel.fl {
+
+  left: -17px;
+
+  top: 43px;
+}
+
+.wheel.fr {
+
+  right: -17px;
+
+  top: 43px;
+}
+
+.wheel.rl {
+
+  left: -17px;
+
+  bottom: 43px;
+}
+
+.wheel.rr {
+
+  right: -17px;
+
+  bottom: 43px;
+}
+
+.front-label,
+.rear-label {
+
+  position: absolute;
+
+  left: 50%;
+
+  transform:
+    translateX(-50%);
+
+  font-size: 13px;
+
+  font-weight: bold;
+
+  opacity: 0.7;
+}
+
+.front-label {
+
+  top: -27px;
+}
+
+.rear-label {
+
+  bottom: -27px;
+}
+
+/* =====================================================
+   SENZORI IR
+   ===================================================== */
+
+.ir {
+
+  position: absolute;
+
+  width: 125px;
+
+  padding: 9px;
+
+  background: #1b2734;
+
+  border: 1px solid #354657;
+
+  border-radius: 13px;
+
+  text-align: center;
+
+  z-index: 3;
+}
+
+.ir-fl {
+
+  left: 0;
+
+  top: 35px;
+}
+
+.ir-fr {
+
+  right: 0;
+
+  top: 35px;
+}
+
+.ir-rl {
+
+  left: 0;
+
+  bottom: 35px;
+}
+
+.ir-rr {
+
+  right: 0;
+
+  bottom: 35px;
+}
+
+.ir-name {
+
+  font-size: 12px;
+
+  font-weight: bold;
+
+  margin-bottom: 6px;
+}
+
+.ir-state {
+
+  display: flex;
+
+  justify-content: center;
+
+  align-items: center;
+
+  gap: 6px;
+
+  font-size: 11px;
+}
+
+.ir-dot {
+
+  width: 13px;
+
+  height: 13px;
+
+  border-radius: 50%;
+
+  background: #555;
+
+}
+
+.ir-dot.clear {
+
+  background: #20bd68;
+
+  box-shadow:
+    0 0 10px rgba(32,189,104,0.7);
+}
+
+.ir-dot.detected {
+
+  background: #e53935;
+
+  box-shadow:
+    0 0 12px rgba(229,57,53,0.8);
+}
+
+/* =====================================================
+   CLAXON
+   ===================================================== */
+
+.horn {
+
+  width: 100%;
+
+  border: none;
+
+  border-radius: 14px;
+
+  padding: 16px;
+
+  background: #644719;
+
+  color: white;
+
+  font-size: 19px;
+
+  font-weight: bold;
+
+  cursor: pointer;
+
+  touch-action: none;
+}
+
+.horn:active {
+
+  transform: scale(0.98);
+
+  background: #89641e;
+}
+
+/* =====================================================
+   DATE LDR + HC
+   ===================================================== */
+
+.data-grid {
+
+  display: grid;
+
+  grid-template-columns:
+    1fr 1fr;
+
+  gap: 12px;
+}
+
+.data-card {
+
+  background: #1a2531;
+
+  border: 1px solid #2f3e4d;
+
+  border-radius: 15px;
+
+  padding: 15px;
+
+  text-align: center;
+}
+
+.data-label {
+
+  font-size: 13px;
+
+  opacity: 0.7;
+
+  margin-bottom: 8px;
+}
+
+.data-value {
+
+  font-size: 27px;
+
+  font-weight: bold;
+}
+
+/* =====================================================
+   LDR BAR
+   ===================================================== */
+
+.progress {
+
+  width: 100%;
+
+  height: 10px;
+
+  margin-top: 10px;
+
+  background: #080c11;
+
+  border-radius: 10px;
+
+  overflow: hidden;
+}
+
+.progress-bar {
+
+  height: 100%;
+
+  width: 0%;
+
+  background: #dba52e;
+
+  border-radius: 10px;
+
+  transition: width 0.25s;
+}
+
+/* =====================================================
+   STATUS
+   ===================================================== */
+
+.status {
+
+  text-align: center;
+
+  font-size: 13px;
+
+  opacity: 0.7;
+
+  margin: 5px 0 10px;
+}
+
+/* =====================================================
+   TELEFON
+   ===================================================== */
+
+@media (max-width: 700px) {
+
+  .drive-area {
+
+    flex-direction: column;
+  }
+
+  .controls-box {
+
+    width: 100%;
+
+    max-width: 330px;
+
+    margin: auto;
+  }
+
+  .data-grid {
+
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 450px) {
+
+  body {
+    padding: 8px;
+  }
+
+  h1 {
+    font-size: 22px;
+  }
+
+  .ir {
+    width: 95px;
+  }
+
+  .ir-name {
+    font-size: 10px;
+  }
+
+  .car {
+    width: 190px;
+    height: 255px;
+  }
+
+  .windshield {
+    width: 125px;
+  }
+
+  .rear-window {
+    width: 110px;
+  }
+
+  .car-area {
+    height: 315px;
+  }
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>🚗 ROBOT ESP32-CAM</h1>
+
+
+<!-- ===================================================
+     MODURI
+     =================================================== -->
+
+<div class="modes">
+
+  <button
+    id="manualBtn"
+    class="mode-btn active"
+    onclick="setMode('MANUAL')">
+
+    🎮 MANUAL
+
+  </button>
+
+  <button
+    id="avoidanceBtn"
+    class="mode-btn"
+    onclick="setMode('AVOIDANCE')">
+
+    🤖 AVOIDANCE
+
+  </button>
+
+</div>
+
+
+<!-- ===================================================
+     CAMERA + BUTOANE
+     =================================================== -->
+
+<div class="drive-area">
+
+  <div class="camera-box">
+
+    <div class="camera-title">
+      📷 CAMERA LIVE
+    </div>
+
+    <img
+      id="camera"
+      class="camera"
+      src="http://%IP%:81/stream"
+      alt="Camera ESP32-CAM"
+    >
+
+  </div>
+
+
+  <div class="controls-box">
+
+    <div class="controls">
+
+      <button
+        id="forward"
+        class="control-btn forward">
+
+        ▲
+
+      </button>
+
+
+      <button
+        id="left"
+        class="control-btn left">
+
+        ◀
+
+      </button>
+
+
+      <button
+        id="right"
+        class="control-btn right">
+
+        ▶
+
+      </button>
+
+
+      <button
+        id="backward"
+        class="control-btn backward">
+
+        ▼
+
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+
+
+<!-- ===================================================
+     MAȘINĂ + IR
+     =================================================== -->
+
+<div class="card">
+
+  <div class="card-title">
+    📡 SENZORI IR
+  </div>
+
+  <div class="car-area">
+
+
+    <!-- IR FAȚĂ STÂNGA -->
+
+    <div
+      id="irFL"
+      class="ir ir-fl">
+
+      <div class="ir-name">
+        FAȚĂ STÂNGA
+      </div>
+
+      <div class="ir-state">
+
+        <span
+          id="dotFL"
+          class="ir-dot clear">
+        </span>
+
+        <span id="stateFL">
+          LIBER
+        </span>
+
+      </div>
+
+    </div>
+
+
+    <!-- IR FAȚĂ DREAPTA -->
+
+    <div
+      id="irFR"
+      class="ir ir-fr">
+
+      <div class="ir-name">
+        FAȚĂ DREAPTA
+      </div>
+
+      <div class="ir-state">
+
+        <span
+          id="dotFR"
+          class="ir-dot clear">
+        </span>
+
+        <span id="stateFR">
+          LIBER
+        </span>
+
+      </div>
+
+    </div>
+
+
+    <!-- IR SPATE STÂNGA -->
+
+    <div
+      id="irRL"
+      class="ir ir-rl">
+
+      <div class="ir-name">
+        SPATE STÂNGA
+      </div>
+
+      <div class="ir-state">
+
+        <span
+          id="dotRL"
+          class="ir-dot clear">
+        </span>
+
+        <span id="stateRL">
+          LIBER
+        </span>
+
+      </div>
+
+    </div>
+
+
+    <!-- IR SPATE DREAPTA -->
+
+    <div
+      id="irRR"
+      class="ir ir-rr">
+
+      <div class="ir-name">
+        SPATE DREAPTA
+      </div>
+
+      <div class="ir-state">
+
+        <span
+          id="dotRR"
+          class="ir-dot clear">
+        </span>
+
+        <span id="stateRR">
+          LIBER
+        </span>
+
+      </div>
+
+    </div>
+
+
+    <!-- MAȘINA -->
+
+    <div class="car">
+
+      <div class="front-label">
+        FAȚĂ
+      </div>
+
+      <div class="rear-label">
+        SPATE
+      </div>
+
+      <div class="windshield"></div>
+
+      <div class="rear-window"></div>
+
+      <div class="car-line"></div>
+
+      <div class="wheel fl"></div>
+      <div class="wheel fr"></div>
+      <div class="wheel rl"></div>
+      <div class="wheel rr"></div>
+
+    </div>
+
+  </div>
+
+</div>
+
+
+<!-- ===================================================
+     CLAXON
+     =================================================== -->
+
+<div class="card">
+
+  <div class="card-title">
+    📢 CLAXON
+  </div>
+
+  <button
+    id="horn"
+    class="horn">
+
+    📢 ȚINE APĂSAT PENTRU CLAXON
+
+  </button>
+
+</div>
+
+
+<!-- ===================================================
+     LDR + HC
+     =================================================== -->
+
+<div class="card">
+
+  <div class="card-title">
+    📊 DATE SENZORI
+  </div>
+
+  <div class="data-grid">
+
+
+    <!-- LDR -->
+
+    <div class="data-card">
+
+      <div class="data-label">
+        💡 LUMINOZITATE
+      </div>
+
+      <div
+        id="ldrValue"
+        class="data-value">
+
+        -- %
+
+      </div>
+
+      <div class="progress">
+
+        <div
+          id="ldrBar"
+          class="progress-bar">
+        </div>
+
+      </div>
+
+    </div>
+
+
+    <!-- HC -->
+
+    <div class="data-card">
+
+      <div class="data-label">
+        📏 HC-SR04
+      </div>
+
+      <div
+        id="distanceValue"
+        class="data-value">
+
+        -- cm
+
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+
+<div
+  id="status"
+  class="status">
+
+  🟢 Conectat
+
+</div>
+
+
+</div>
+
+
+<script>
+
+// =====================================================
+// MOD CURENT
+// =====================================================
+
+let currentMode = "MANUAL";
+
+
+// =====================================================
+// SCHIMBARE MOD
+// =====================================================
+
+function setMode(mode) {
+
+  // Oprim mașina înainte de schimbarea modului
+  sendCommand("MOVE_STOP");
+
+  currentMode = mode;
+
+  fetch("/mode?mode=" + mode)
+    .catch(() => {});
+
+
+  document
+    .getElementById("manualBtn")
+    .classList
+    .toggle(
+      "active",
+      mode === "MANUAL"
+    );
+
+  document
+    .getElementById("avoidanceBtn")
+    .classList
+    .toggle(
+      "active",
+      mode === "AVOIDANCE"
+    );
+}
+
+
+// =====================================================
+// COMANDĂ
+// =====================================================
+
+function sendCommand(command) {
+
+  fetch(
+    "/command?cmd=" +
+    encodeURIComponent(command)
+  ).catch(() => {});
+}
+
+
+// =====================================================
+// CONTROL DIRECȚIE
+//
+// IMPORTANT:
+// - apăsat  -> MOVE
+// - eliberat -> MOVE_STOP
+// =====================================================
+
+function setupControl(id, command) {
+
+  const button =
+    document.getElementById(id);
+
+
+  // ---------------------------------------------------
+  // MOUSE
+  // ---------------------------------------------------
+
+  button.addEventListener(
+    "mousedown",
+    function(e) {
+
+      e.preventDefault();
+
+      if (currentMode === "MANUAL") {
+
+        sendCommand(command);
+      }
+    }
+  );
+
+
+  button.addEventListener(
+    "mouseup",
+    function(e) {
+
+      e.preventDefault();
+
+      sendCommand("MOVE_STOP");
+    }
+  );
+
+
+  button.addEventListener(
+    "mouseleave",
+    function() {
+
+      sendCommand("MOVE_STOP");
+    }
+  );
+
+
+  // ---------------------------------------------------
+  // TOUCH
+  // ---------------------------------------------------
+
+  button.addEventListener(
+    "touchstart",
+    function(e) {
+
+      e.preventDefault();
+
+      if (currentMode === "MANUAL") {
+
+        sendCommand(command);
+      }
+
+    },
+    {
+      passive: false
+    }
+  );
+
+
+  button.addEventListener(
+    "touchend",
+    function(e) {
+
+      e.preventDefault();
+
+      sendCommand("MOVE_STOP");
+
+    },
+    {
+      passive: false
+    }
+  );
+
+
+  button.addEventListener(
+    "touchcancel",
+    function(e) {
+
+      e.preventDefault();
+
+      sendCommand("MOVE_STOP");
+
+    },
+    {
+      passive: false
+    }
+  );
+}
+
+
+// =====================================================
+// CONFIGURARE BUTOANE
+// =====================================================
+
+setupControl(
+  "forward",
+  "MOVE_F"
+);
+
+setupControl(
+  "backward",
+  "MOVE_B"
+);
+
+setupControl(
+  "left",
+  "MOVE_L"
+);
+
+setupControl(
+  "right",
+  "MOVE_R"
+);
+
+
+// =====================================================
+// OPREȘTE MAȘINA DACĂ IEȘI DIN PAGINĂ
+// =====================================================
+
+window.addEventListener(
+  "blur",
+  function() {
+
+    sendCommand("MOVE_STOP");
+  }
+);
+
+
+document.addEventListener(
+  "visibilitychange",
+  function() {
+
+    if (document.hidden) {
+
+      sendCommand("MOVE_STOP");
+    }
+  }
+);
+
+
+// =====================================================
+// CLAXON
+// =====================================================
+
+const hornButton =
+  document.getElementById("horn");
+
+
+function hornOn() {
+
+  fetch("/horn")
+    .catch(() => {});
+}
+
+
+hornButton.addEventListener(
+  "mousedown",
+  function(e) {
+
+    e.preventDefault();
+
+    hornOn();
+  }
+);
+
+
+hornButton.addEventListener(
+  "touchstart",
+  function(e) {
+
+    e.preventDefault();
+
+    hornOn();
+
+  },
+  {
+    passive: false
+  }
+);
+
+
+// =====================================================
+// IR
+// =====================================================
+
+function updateIR(
+  dotID,
+  stateID,
+  value
+) {
+
+  const dot =
+    document.getElementById(dotID);
+
+  const state =
+    document.getElementById(stateID);
+
+
+  if (Number(value) === 1) {
+
+    dot.className =
+      "ir-dot detected";
+
+    state.innerText =
+      "DETECTAT";
+
+  } else {
+
+    dot.className =
+      "ir-dot clear";
+
+    state.innerText =
+      "LIBER";
+  }
+}
+
+
+// =====================================================
+// CITIRE SENZORI
+// =====================================================
+
+function getSensors() {
+
+  fetch(
+    "/sensors?t=" +
+    Date.now()
+  )
+
+  .then(function(response) {
+
+    return response.json();
+
+  })
+
+  .then(function(data) {
+
+    // IR
+
+    updateIR(
+      "dotFL",
+      "stateFL",
+      data.fl
+    );
+
+    updateIR(
+      "dotFR",
+      "stateFR",
+      data.fr
+    );
+
+    updateIR(
+      "dotRL",
+      "stateRL",
+      data.rl
+    );
+
+    updateIR(
+      "dotRR",
+      "stateRR",
+      data.rr
+    );
+
+
+    // HC-SR04
+
+    if (
+      data.distance !== undefined
+    ) {
+
+      document
+        .getElementById(
+          "distanceValue"
+        )
+        .innerText =
+          Number(data.distance)
+          .toFixed(0) +
+          " cm";
+    }
+
+
+    // LDR
+
+    if (
+      data.ldr !== undefined
+    ) {
+
+      let ldr =
+        Number(data.ldr);
+
+      ldr =
+        Math.max(
+          0,
+          Math.min(
+            100,
+            ldr
+          )
+        );
+
+
+      document
+        .getElementById(
+          "ldrValue"
+        )
+        .innerText =
+          ldr.toFixed(0) +
+          " %";
+
+
+      document
+        .getElementById(
+          "ldrBar"
+        )
+        .style.width =
+          ldr + "%";
+    }
+
+
+    // STATUS
+
+    document
+      .getElementById("status")
+      .innerText =
+        "🟢 Senzori conectați";
+
+  })
+
+  .catch(function() {
+
+    document
+      .getElementById("status")
+      .innerText =
+        "🔴 Conexiune senzori pierdută";
+
+  });
+}
+
+
+// =====================================================
+// UPDATE SENZORI
+// =====================================================
+
+setInterval(
+  getSensors,
+  300
+);
+
+getSensors();
+
+</script>
+
+</body>
+</html>
+
+)rawliteral";
+
+
+  html.replace(
+    "%IP%",
+    WiFi.localIP().toString()
+  );
+
+  server.send(
+    200,
+    "text/html",
+    html
+  );
+}
+
+
+// =====================================================
+// MOD
+// =====================================================
+
+void handleMode() {
+
+  if (!server.hasArg("mode")) {
+
+    server.send(
+      400,
+      "text/plain",
+      "MODE lipseste"
+    );
+
+    return;
+  }
+
+  String mode =
+    server.arg("mode");
+
+
+  if (mode == "MANUAL") {
+
+    Serial.println(
+      "MODE_MANUAL"
+    );
+
+    server.send(
+      200,
+      "text/plain",
+      "MANUAL"
+    );
+
+    return;
+  }
+
+
+  if (mode == "AVOIDANCE") {
+
+    Serial.println(
+      "MODE_AVOIDANCE"
+    );
+
+    server.send(
+      200,
+      "text/plain",
+      "AVOIDANCE"
+    );
+
+    return;
+  }
+
+
+  server.send(
+    400,
+    "text/plain",
+    "MODE invalid"
+  );
+}
+
+
+// =====================================================
+// COMENZI
+// =====================================================
+
+void handleCommand() {
+
+  if (!server.hasArg("cmd")) {
+
+    server.send(
+      400,
+      "text/plain",
+      "CMD lipseste"
+    );
+
+    return;
+  }
+
+  String cmd =
+    server.arg("cmd");
+
+
+  if (
+    cmd == "MOVE_F" ||
+    cmd == "MOVE_B" ||
+    cmd == "MOVE_L" ||
+    cmd == "MOVE_R" ||
+    cmd == "MOVE_STOP"
+  ) {
+
+    Serial.println(cmd);
+
+    server.send(
+      200,
+      "text/plain",
+      "OK"
+    );
+
+    return;
+  }
+
+
+  server.send(
+    400,
+    "text/plain",
+    "CMD invalid"
+  );
+}
+
+
+// =====================================================
+// SENZORI JSON
+// =====================================================
+
+void handleSensors() {
+
+  bool live =
+    (millis() - lastSensorFrame) < 1000;
+
+
+  String json = "{";
+
+
+  json +=
+    "\"fl\":" +
+    String(irFrontLeft) +
+    ",";
+
+
+  json +=
+    "\"fr\":" +
+    String(irFrontRight) +
+    ",";
+
+
+  json +=
+    "\"rl\":" +
+    String(irRearLeft) +
+    ",";
+
+
+  json +=
+    "\"rr\":" +
+    String(irRearRight) +
+    ",";
+
+
+  json +=
+    "\"distance\":" +
+    String(hcDistance) +
+    ",";
+
+
+  json +=
+    "\"servo\":" +
+    String(servoPosition) +
+    ",";
+
+
+  json +=
+    "\"ldr\":" +
+    String(ldrPercent) +
+    ",";
+
+
+  json +=
+    "\"live\":" +
+    String(
+      live ? "true" : "false"
+    );
+
+
+  json += "}";
+
+
+  server.send(
+    200,
+    "application/json",
+    json
+  );
+}
+
+
+// =====================================================
+// CLAXON
+// =====================================================
+
+void handleHorn() {
+
+  Serial.println("HORN");
+
+  Serial.flush();
+
+  server.send(
+    200,
+    "text/plain",
+    "HORN OK"
+  );
+}
+
+
+// =====================================================
+// CAMERA STREAM
+// =====================================================
+
+static esp_err_t stream_handler(
+  httpd_req_t *req
+) {
+
+  camera_fb_t *fb = NULL;
+
+  esp_err_t res = ESP_OK;
+
+  char part_buf[64];
+
+
+  static const char*
+  STREAM_CONTENT_TYPE =
+    "multipart/x-mixed-replace;boundary=frame";
+
+
+  static const char*
+  STREAM_BOUNDARY =
+    "\r\n--frame\r\n";
+
+
+  static const char*
+  STREAM_PART =
+    "Content-Type: image/jpeg\r\n"
+    "Content-Length: %u\r\n\r\n";
+
+
+  res =
+    httpd_resp_set_type(
+      req,
+      STREAM_CONTENT_TYPE
+    );
+
+
+  if (res != ESP_OK) {
+
+    return res;
+  }
+
+
+  httpd_resp_set_hdr(
+    req,
+    "Access-Control-Allow-Origin",
+    "*"
+  );
+
+
+  while (true) {
+
+    fb =
+      esp_camera_fb_get();
+
+
+    if (!fb) {
+
+      res = ESP_FAIL;
+
+    }
+
+    else {
+
+      size_t hlen =
+        snprintf(
+          part_buf,
+          64,
+          STREAM_PART,
+          fb->len
+        );
+
+
+      res =
+        httpd_resp_send_chunk(
+          req,
+          STREAM_BOUNDARY,
+          strlen(
+            STREAM_BOUNDARY
+          )
+        );
+
+
+      if (res == ESP_OK) {
+
+        res =
+          httpd_resp_send_chunk(
+            req,
+            part_buf,
+            hlen
+          );
+      }
+
+
+      if (res == ESP_OK) {
+
+        res =
+          httpd_resp_send_chunk(
+            req,
+            (const char*)fb->buf,
+            fb->len
+          );
+      }
+
+
+      esp_camera_fb_return(fb);
+    }
+
+
+    if (res != ESP_OK) {
+
+      break;
+    }
+  }
+
+
+  return res;
+}
+
+
+// =====================================================
+// PORNIRE SERVER CAMERA
+// =====================================================
+
+void startCameraServer() {
+
+  httpd_config_t config =
+    HTTPD_DEFAULT_CONFIG();
+
+
+  config.server_port = 81;
+
+  config.ctrl_port = 32769;
+
+
+  httpd_uri_t stream_uri;
+
+
+  stream_uri.uri =
+    "/stream";
+
+  stream_uri.method =
+    HTTP_GET;
+
+  stream_uri.handler =
+    stream_handler;
+
+  stream_uri.user_ctx =
+    NULL;
+
+
+  if (
+    httpd_start(
+      &stream_httpd,
+      &config
+    ) == ESP_OK
+  ) {
+
+    httpd_register_uri_handler(
+      stream_httpd,
+      &stream_uri
+    );
+  }
+}
+
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup() {
+
+  Serial.begin(9600);
+
+
+  // ---------------------------------------------------
+  // CAMERA CONFIG
+  // ---------------------------------------------------
+
+  camera_config_t config;
+
+
+  config.ledc_channel =
+    LEDC_CHANNEL_0;
+
+  config.ledc_timer =
+    LEDC_TIMER_0;
+
+
+  config.pin_d0 =
+    Y2_GPIO_NUM;
+
+  config.pin_d1 =
+    Y3_GPIO_NUM;
+
+  config.pin_d2 =
+    Y4_GPIO_NUM;
+
+  config.pin_d3 =
+    Y5_GPIO_NUM;
+
+  config.pin_d4 =
+    Y6_GPIO_NUM;
+
+  config.pin_d5 =
+    Y7_GPIO_NUM;
+
+  config.pin_d6 =
+    Y8_GPIO_NUM;
+
+  config.pin_d7 =
+    Y9_GPIO_NUM;
+
+
+  config.pin_xclk =
+    XCLK_GPIO_NUM;
+
+  config.pin_pclk =
+    PCLK_GPIO_NUM;
+
+  config.pin_vsync =
+    VSYNC_GPIO_NUM;
+
+  config.pin_href =
+    HREF_GPIO_NUM;
+
+
+  config.pin_sscb_sda =
+    SIOD_GPIO_NUM;
+
+  config.pin_sscb_scl =
+    SIOC_GPIO_NUM;
+
+
+  config.pin_pwdn =
+    PWDN_GPIO_NUM;
+
+  config.pin_reset =
+    RESET_GPIO_NUM;
+
+
+  config.xclk_freq_hz =
+    20000000;
+
+
+  config.pixel_format =
+    PIXFORMAT_JPEG;
+
+
+  if (psramFound()) {
+
+    config.frame_size =
+      FRAMESIZE_VGA;
+
+    config.jpeg_quality =
+      10;
+
+    config.fb_count =
+      2;
+
+  }
+
+  else {
+
+    config.frame_size =
+      FRAMESIZE_QVGA;
+
+    config.jpeg_quality =
+      12;
+
+    config.fb_count =
+      1;
+  }
+
+
+  // ---------------------------------------------------
+  // INIT CAMERA
+  // ---------------------------------------------------
+
+  if (
+    esp_camera_init(
+      &config
+    ) != ESP_OK
+  ) {
+
+    while (true) {
+
+      delay(1000);
+    }
+  }
+
+
+  // ---------------------------------------------------
+  // WIFI
+  // ---------------------------------------------------
+
+  WiFi.begin(
+    ssid,
+    password
+  );
+
+
+  while (
+    WiFi.status() !=
+    WL_CONNECTED
+  ) {
+
+    delay(500);
+  }
+
+
+  // ---------------------------------------------------
+  // WEB SERVER
+  // ---------------------------------------------------
+
+  server.on(
+    "/",
+    HTTP_GET,
+    handleRoot
+  );
+
+
+  server.on(
+    "/mode",
+    HTTP_GET,
+    handleMode
+  );
+
+
+  server.on(
+    "/command",
+    HTTP_GET,
+    handleCommand
+  );
+
+
+  server.on(
+    "/sensors",
+    HTTP_GET,
+    handleSensors
+  );
+
+
+  server.on(
+    "/horn",
+    HTTP_GET,
+    handleHorn
+  );
+
+
+  server.begin();
+
+
+  // ---------------------------------------------------
+  // CAMERA SERVER PORT 81
+  // ---------------------------------------------------
+
+  startCameraServer();
+
+
+  // ---------------------------------------------------
+  // UART TASK
+  // ---------------------------------------------------
+
+  xTaskCreatePinnedToCore(
+
+    readMegaSensorDataTask,
+
+    "UART_IR",
+
+    4096,
+
+    NULL,
+
+    2,
+
+    &uartTaskHandle,
+
+    1
+  );
+}
+
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop() {
+
+  server.handleClient();
+
+  delay(1);
+}
